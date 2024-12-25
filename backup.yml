@@ -1,7 +1,7 @@
 ---
 
 - name: Deploy PostgreSQL standalone | Pre-checks servers for playbook
-  hosts: hosts_postgresql
+  hosts: hosts_backup
   become: true
   become_method: sudo
   gather_facts: true
@@ -38,7 +38,7 @@
       tags: always
 
   tasks:
-   - name: Get ansible_host IP
+  - name: Get ansible_host IP
     debug:
       msg: "IP Address (ansible_host): {{ ansible_host }}"
 
