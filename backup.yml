@@ -38,10 +38,69 @@
       tags: always
 
   tasks:
-  - name: Get ansible_host IP
-    debug:
-      msg: "IP Address (ansible_host): {{ ansible_host }}"
 
   - name: Get default IPv4 IP address
     debug:
       msg: "Default IPv4 IP Address: {{ ansible_default_ipv4.address }}"
+
+  - name: Run patronictl list
+    command: patronictl -c /etc/patroni/patroni.yml list
+    register: patronictl_output
+    ignore_errors: true
+
+  - name: patronictl_output
+    debug:
+      msg: "{{ patronictl_output }}"
+
+  - name: Fail if patronictl command failed
+    fail:
+      msg: "Failed to get Patroni list using patronictl"
+    when: patronictl_output.rc != 0
+
+  - name: Parse patronictl output and set facts
+    set_fact:
+      patroni_members: "{{ patronictl_output.stdout_lines | select('search', '\\|.*running.*\\|') | map('regex_replace', '^\\|\\s*(.*?)\\s*\\|\\s*(.*?)\\s*\\|.*$', '\\1:\\2') | list }}"
+      patroni_leader_name: "{{ patronictl_output.stdout_lines | select('search', '\\|.*Leader.*\\|') | map('regex_replace', '^\\|\\s*(.*?)\\s*\\|.*$', '\\1') | first | default('No leader found') }}"
+    when: patronictl_output.rc == 0 
+
+  - name: Parse patronictl output and set facts
+    set_fact:
+      patroni_leader_ip: "{{ patroni_members | select('search', '^' + patroni_leader_name + ':') | map('regex_replace', '^.*?:(.*)$', '\\1') | first | default('No leader ip found') }}"
+    when: patronictl_output.rc == 0 and patroni_leader_name != 'No leader found'
+
+  - name: Print the master node
+    debug:
+      msg: "The current master node is: {{ patroni_leader_name }} {{ patroni_leader_ip }}"
+    when: patronictl_output.rc == 0
+
+  - name: Create directory for dumps on leader
+    file:
+      path: /var/lib/postgresql/dump
+      state: directory
+      owner: postgres
+      group: postgres
+      mode: '0755'
+    delegate_to: "{{ patroni_leader_ip }}"
+    run_once: true
+    become: yes
+    become_user: postgres
+    when: patroni_leader_ip != 'No leader ip found'
+
+  - name: Run pg_dump on leader
+    command: "pg_dump -U postgres -d {{ database_name }} -f //var/lib/postgresql/dump/{{ database_name }}.dump"
+    register: pg_dump_output
+    delegate_to: "{{ patroni_leader_ip }}"
+    run_once: true
+    become: yes
+    become_user: postgres
+    when: patroni_leader_ip != 'No leader ip found'
+
+  - name: Fail if pg_dump failed
+    fail:
+      msg: "Failed to run pg_dump"
+    when: pg_dump_output.rc != 0 and patroni_leader_ip != 'No leader ip found'
+    
+  - name: Print backup information
+    debug:
+      msg: "Backup was created on host {{ patroni_leader_ip }}, and saved to file /var/lib/postgresq/dump/{{ database_name }}.dump"
+    when: patroni_leader_ip != 'No leader ip found'

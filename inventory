@@ -1,9 +1,8 @@
 [hosts_backup]
-192.168.62.211 hostname=test1 postgresql_exists=false
+10.128.67.200 database_name=dimon
 
 [all:vars]
 ansible_connection='ssh'
 ansible_ssh_port='22'
 ansible_user='root'
-ansible_ssh_pass='root'  # "sshpass" package is required for use "ansible_ssh_pass"
-#ansible_ssh_private_key_file=
+ansible_ssh_pass='root'  
