@@ -83,22 +83,30 @@
     when: patroni_leader_ip != 'No leader ip found'
 
   - name: Run pg_dump on leader
-    command: "pg_dump -U postgres -d {{ database_name }} -f //var/lib/postgresql/dump/{{ database_name }}_{{ ansible_date_time.year }}{{ ansible_date_time.month }}{{ ansible_date_time.day }}.dump"
+    command: "pg_dump -U postgres -d {{ database }} -f //var/lib/postgresql/dump/{{ database }}_{{ ansible_date_time.year }}{{ ansible_date_time.month }}{{ ansible_date_time.day }}.dump"
     register: pg_dump_output
     delegate_to: "{{ patroni_leader_ip }}"
-    run_once: true
     become: yes
     become_user: postgres
+    with_items: "{{ database_name }}"
+    loop_control:
+      loop_var: database
     when: patroni_leader_ip != 'No leader ip found'
 
   - name: Fail if pg_dump failed
     fail:
-      msg: "Failed to run pg_dump"
-    when: pg_dump_output.rc != 0 and patroni_leader_ip != 'No leader ip found'
-    
+      msg: "Failed to run pg_dump for database {{ database_name[item] }}"
+    when: pg_dump_output.results[item].rc != 0 and patroni_leader_ip != 'No leader ip found'
+    with_items: "{{ range(database_name | length) | list }}"
+    loop_control:
+      loop_var: item
+
   - name: Print backup information
     debug:
-      msg: "Backup was created on host {{ patroni_leader_ip }}, and saved to file /var/lib/postgresq/dump/{{ database_name }}_{{ ansible_date_time.year }}{{ ansible_date_time.month }}{{ ansible_date_time.day }}.dump"
+      msg: "Backup was created on host {{ patroni_leader_ip }}, and saved to file /var/lib/postgresq/dump/{{ database }}_{{ ansible_date_time.year }}{{ ansible_date_time.month }}{{ ansible_date_time.day }}.dump"
+    with_items: "{{ database_name }}"
+    loop_control:
+      loop_var: database   
     when: patroni_leader_ip != 'No leader ip found'
 
   - name: Get disk space information
