@@ -48,10 +48,6 @@
     register: patronictl_output
     ignore_errors: true
 
-  - name: patronictl_output
-    debug:
-      msg: "{{ patronictl_output }}"
-
   - name: Fail if patronictl command failed
     fail:
       msg: "Failed to get Patroni list using patronictl"
@@ -87,7 +83,7 @@
     when: patroni_leader_ip != 'No leader ip found'
 
   - name: Run pg_dump on leader
-    command: "pg_dump -U postgres -d {{ database_name }} -f //var/lib/postgresql/dump/{{ database_name }}.dump"
+    command: "pg_dump -U postgres -d {{ database_name }} -f //var/lib/postgresql/dump/{{ database_name }}_{{ ansible_date_time.year }}{{ ansible_date_time.month }}{{ ansible_date_time.day }}.dump"
     register: pg_dump_output
     delegate_to: "{{ patroni_leader_ip }}"
     run_once: true
@@ -102,5 +98,15 @@
     
   - name: Print backup information
     debug:
-      msg: "Backup was created on host {{ patroni_leader_ip }}, and saved to file /var/lib/postgresq/dump/{{ database_name }}.dump"
+      msg: "Backup was created on host {{ patroni_leader_ip }}, and saved to file /var/lib/postgresq/dump/{{ database_name }}_{{ ansible_date_time.year }}{{ ansible_date_time.month }}{{ ansible_date_time.day }}.dump"
     when: patroni_leader_ip != 'No leader ip found'
+
+  - name: Get disk space information
+    command: df -h
+    register: disk_space_info
+    become: yes  # Требуются права root для выполнения df
+    become_user: root  # Явное указание пользователя root
+
+  - name: Display disk space information
+    debug:
+      msg: "{{ disk_space_info.stdout_lines }}"
