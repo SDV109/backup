@@ -134,8 +134,9 @@
     when: patroni_leader_ip != 'No leader ip found'
 
   - name: Get disk space information
-    command: df -h /var/lib/postgresql/dump
+    command: df -h /var/lib/postgresql/dump/
     register: disk_space_info
+    delegate_to: "{{ patroni_leader_ip }}"
     become: yes  # Требуются права root для выполнения df
     become_user: root  # Явное указание пользователя root
 
