@@ -82,8 +82,32 @@
     become_user: postgres
     when: patroni_leader_ip != 'No leader ip found'
 
+  - name: Check if database exists using psql
+    command: psql -U postgres -d postgres -c "SELECT true FROM pg_database WHERE datname='{{ item }}';"
+    register: psql_result
+    delegate_to: "{{ patroni_leader_ip }}"
+    become: yes
+    become_user: postgres    
+    loop: "{{ database_name }}"
+    ignore_errors: true  # Игнорируем ошибки, потому что запрос вернет ошибку, если базы нет.
+
+  - name: Display disk space information
+    debug:
+      msg: "{{ psql_result.results[item] }}"
+    loop: "{{ range(database_name | length) | list }}"
+    loop_control:
+      loop_var: item
+
+  - name: Fail if any database does not exist
+    fail:
+      msg: "Database {{ database_names[item] }} does not exist. Aborting playbook."
+    when: "'(0 rows)' in psql_result.results[item].stdout"
+    loop: "{{ range(database_names | length) | list }}"
+    loop_control:
+      loop_var: item
+
   - name: Run pg_dump on leader
-    command: "pg_dump -U postgres -d {{ database }} -f //var/lib/postgresql/dump/{{ database }}_{{ ansible_date_time.year }}{{ ansible_date_time.month }}{{ ansible_date_time.day }}.dump"
+    command: "pg_dump -U postgres -d {{ database }} -f //var/lib/postgresql/dump/{{ database }}_{{ ansible_date_time.year }}-{{ ansible_date_time.month }}-{{ ansible_date_time.day }}_{{ ansible_date_time.hour }}-{{ ansible_date_time.minute }}.dump"
     register: pg_dump_output
     delegate_to: "{{ patroni_leader_ip }}"
     become: yes
@@ -103,7 +127,7 @@
 
   - name: Print backup information
     debug:
-      msg: "Backup was created on host {{ patroni_leader_ip }}, and saved to file /var/lib/postgresq/dump/{{ database }}_{{ ansible_date_time.year }}{{ ansible_date_time.month }}{{ ansible_date_time.day }}.dump"
+      msg: "Backup was created on host {{ patroni_leader_ip }}, and saved to file /var/lib/postgresq/dump/{{ database }}_{{ ansible_date_time.year }}-{{ ansible_date_time.month }}-{{ ansible_date_time.day }}_{{ ansible_date_time.hour }}-{{ ansible_date_time.minute }}.dump"
     with_items: "{{ database_name }}"
     loop_control:
       loop_var: database   

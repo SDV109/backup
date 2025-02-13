@@ -1,12 +1,10 @@
 [hosts_backup]
 10.128.67.200 
-database_name:
-  - db1
-  - db2
-  - db3
 
 [all:vars]
 ansible_connection='ssh'
 ansible_ssh_port='22'
 ansible_user='root'
 ansible_ssh_pass='root'  
+
+database_name=['diamond', 'test']
