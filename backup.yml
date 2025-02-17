@@ -84,30 +84,75 @@
 
   - name: Check if database exists using psql
     command: psql -U postgres -d postgres -c "SELECT true FROM pg_database WHERE datname='{{ item }}';"
-    register: psql_result
+    register: database_exists_result
     delegate_to: "{{ patroni_leader_ip }}"
     become: yes
     become_user: postgres    
     loop: "{{ database_name }}"
     ignore_errors: true  # Игнорируем ошибки, потому что запрос вернет ошибку, если базы нет.
 
-  - name: Display disk space information
-    debug:
-      msg: "{{ psql_result.results[item] }}"
+  - name: Fail if any database does not exist
+    fail:
+      msg: "Database {{ database_name[item] }} does not exist. Aborting playbook."
+    when: "'(0 rows)' in database_exists_result.results[item].stdout"
+    loop: "{{ range(database_name | length) | list }}"
+    loop_control:
+      loop_var: item
+#-------------------------------
+
+  - name: Get size of each database (using awk)
+    shell: "psql -U postgres -d postgres -c \"SELECT pg_database_size(datname) FROM pg_database WHERE datname='{{ item }}';\" | awk 'NR==3 {print $1}'"
+    register: db_size_result
+    loop: "{{ database_name }}"
+    loop_control:
+      loop_var: item
+    ignore_errors: true # чтобы продолжить, даже если база не найдена
+
+  - name: Collect database sizes
+    set_fact:
+      all_db_sizes: "{{ all_db_sizes | default([]) + [db_size_result.results[item].stdout] }}"
     loop: "{{ range(database_name | length) | list }}"
     loop_control:
       loop_var: item
 
-  - name: Fail if any database does not exist
-    fail:
-      msg: "Database {{ database_names[item] }} does not exist. Aborting playbook."
-    when: "'(0 rows)' in psql_result.results[item].stdout"
-    loop: "{{ range(database_names | length) | list }}"
+  - name: Convert all database sizes to integers
+    set_fact:
+      db_sizes: "{{ all_db_sizes | map('int') | list }}"
+    when: all_db_sizes is defined
+
+  - name: Calculate total database size
+    set_fact:
+      total_db_size: "{{ db_sizes | sum(start=0) }}"
+    when: db_sizes is defined
+
+  - name: Get free disk space
+    shell: "df -B1 /var/lib/postgresql/dump/ | tail -1 | awk '{print $4}'"
+    register: disk_space
+    delegate_to: "{{ patroni_leader_ip }}"
+    become: yes  # Требуются права root для выполнения df
+    become_user: root  # Явное указание пользователя root
+
+  - name: Convert free disk space to integer
+    set_fact:
+      free_disk_space: "{{ disk_space.stdout | int }}"
+    when: disk_space.stdout is defined
+
+  - name: Print database names and sizes in MB
+    debug:
+      msg: "Database {{ database_name[item] }} size: {{ (db_sizes[item] / (1024 * 1024)) | round(2) }} MB"
+    loop: "{{ range(database_name | length) | list }}"
     loop_control:
       loop_var: item
+    when: total_db_size > free_disk_space and total_db_size is defined and db_sizes is defined
 
+  - name: Fail if not enough disk space
+    fail:
+      msg: "Not enough disk space. Total database size: {{ (total_db_size | int / (1024 * 1024)) | round(2) }} MB. Free disk space: {{ (free_disk_space | int / (1024 * 1024)) | round(2) }} MB."
+    when: total_db_size > free_disk_space and total_db_size is defined
+
+#-------------------------------
   - name: Run pg_dump on leader
-    command: "pg_dump -U postgres -d {{ database }} -f //var/lib/postgresql/dump/{{ database }}_{{ ansible_date_time.year }}-{{ ansible_date_time.month }}-{{ ansible_date_time.day }}_{{ ansible_date_time.hour }}-{{ ansible_date_time.minute }}.dump"
+    command: "pg_dump -U postgres -d {{ database }} -f /var/lib/postgresql/dump/{{ database }}_{{ ansible_date_time.year }}-{{ ansible_date_time.month }}-{{ ansible_date_time.day }}_{{ ansible_date_time.hour }}-{{ ansible_date_time.minute }}.dump"
     register: pg_dump_output
     delegate_to: "{{ patroni_leader_ip }}"
     become: yes
